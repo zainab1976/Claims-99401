@@ -178,14 +178,57 @@ function updateOriginalExcel(originalFilePath, results, sheetName = null) {
     }
   }
 
-  // Create a map of results by row number for quick lookup
+  // Create a map of results by row number - group multiple results per row
   const resultsMap = new Map();
   results.forEach(result => {
     const rowNum = result.rowNumber || result._rowNumber;
     if (rowNum) {
-      resultsMap.set(rowNum, result);
+      if (!resultsMap.has(rowNum)) {
+        resultsMap.set(rowNum, []);
+      }
+      resultsMap.get(rowNum).push(result);
     }
   });
+
+  // Helper function to aggregate statuses from multiple results
+  // Priority: Billed > Appt. Cancelled > Success > Failed > Others
+  function aggregateStatus(results) {
+    if (!results || results.length === 0) return 'Unknown';
+    
+    const statuses = results.map(r => r.status || 'Unknown');
+    const uniqueStatuses = [...new Set(statuses)];
+    
+    // Priority order: Billed > Appt. Cancelled > Success > Failed
+    if (uniqueStatuses.includes('Billed')) {
+      // If all are Billed, return Billed; otherwise show combination
+      if (uniqueStatuses.length === 1) return 'Billed';
+      return `Billed (${results.length} patients)`;
+    }
+    if (uniqueStatuses.includes('Appt. Cancelled')) {
+      // If all are Appt. Cancelled, return Appt. Cancelled; otherwise show combination
+      if (uniqueStatuses.length === 1) return 'Appt. Cancelled';
+      return `Appt. Cancelled (${results.length} patients)`;
+    }
+    if (uniqueStatuses.includes('Success')) {
+      // If all are Success, return Success; otherwise show combination
+      if (uniqueStatuses.length === 1) return 'Success';
+      return `Success (${results.length} patients)`;
+    }
+    if (uniqueStatuses.includes('Failed')) {
+      // If any failed, prioritize showing failed status
+      const failedCount = statuses.filter(s => s === 'Failed').length;
+      if (failedCount === results.length) return 'Failed';
+      return `Failed (${failedCount}/${results.length} patients)`;
+    }
+    
+    // If multiple different statuses, combine them
+    if (uniqueStatuses.length > 1) {
+      return uniqueStatuses.join(', ');
+    }
+    
+    // Single status
+    return uniqueStatuses[0];
+  }
 
   // Update rows with status
   for (let i = 1; i < rows.length; i++) {
@@ -197,13 +240,13 @@ function updateOriginalExcel(originalFilePath, results, sheetName = null) {
       row.push('');
     }
     
-    // Update status if we have a result for this row
-    const result = resultsMap.get(excelRowNumber);
-    if (result) {
-      // Use the status from result (e.g., "Billed", "Cancelled", "Success", "Failed")
-      const statusValue = result.status || 'Unknown';
+    // Update status if we have results for this row
+    const rowResults = resultsMap.get(excelRowNumber);
+    if (rowResults && rowResults.length > 0) {
+      // Aggregate status from all results for this row
+      const statusValue = aggregateStatus(rowResults);
       row[statusColumnIndex] = statusValue;
-      console.log(`   📝 Row ${excelRowNumber}: Updated Status to "${statusValue}"`);
+      console.log(`   📝 Row ${excelRowNumber}: Updated Status to "${statusValue}" (${rowResults.length} patient(s))`);
     } else {
       // If no result found for this row, mark as "Not Processed"
       if (!row[statusColumnIndex] || row[statusColumnIndex] === '') {
